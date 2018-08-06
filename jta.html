@@ -1,0 +1,332 @@
+<html>
+   <head></head>
+   <body>
+      <h1>JavaScript Template Attack</h1>
+      <div id="log" style="font-family: monospace;">
+         Running, please wait...
+      </div>
+      <canvas id="glCanvas" width="120" height="32"></canvas>
+      <script type="text/javascript">
+         (function(target) {
+         var max_depth = 10;
+         var start;
+         var check_hashes = false;
+         var logconsole = "";
+         
+         var dups = 0;
+         
+         var LOG_DEBUG = 1, LOG_INFO = 2, LOG_WARNING = 4, LOG_ERROR = 8, LOG_RESULT = 16;
+         
+         function hash(o) {
+             return JSON.stringify(o);
+         }
+         
+         function log(level, o) {
+             var col = "black";
+             switch(level) {
+                 case LOG_DEBUG:
+                     col = "gray";
+                     break;
+                 case LOG_INFO:
+                     col = "black";
+                     break;
+                 case LOG_WARNING:
+                     col = "orange";
+                     break;
+                 case LOG_ERROR:
+                     col = "red";
+                     break;
+                 case LOG_RESULT:
+                     col = "blue";
+                     break;
+             }
+             
+             logconsole += "<span style='color: " + col + ";'>[" + new Date().toLocaleTimeString() + "] " + o + "</span><br />\n";
+             
+         }
+         
+         function add_webgl() {
+             log(LOG_INFO, "Adding WebGL object");
+             window.canvas = document.querySelector("#glCanvas");
+             window.gl = window.canvas.getContext("webgl");
+             
+             if(window.gl != null) {
+             var x = 0, y = 0;
+             for(var i in window.gl) {
+                 if(i.toUpperCase() == i) {
+                     x++;
+                 } else y++;
+             }
+             log(LOG_DEBUG, "[WebGL] " + x + " constants");
+             log(LOG_DEBUG, "[WebGL] " + (x+y) + " total properties in WebGL");
+         
+             window.wgl = {};
+             for(var i in window.gl) {
+                 try {
+                    window.wgl[i] = gl.getParameter(gl[i]);
+                 } catch(e) {}
+             }
+             
+         
+             var glext = [    
+             "ANGLE_instanced_arrays",
+             "EXT_blend_minmax",
+             "EXT_clip_cull_distance",
+             "EXT_color_buffer_float",
+             "EXT_color_buffer_half_float",
+             "EXT_disjoint_timer_query",
+             "EXT_disjoint_timer_query_webgl2",
+             "EXT_float_blend",
+             "EXT_frag_depth",
+             "EXT_shader_texture_lod",
+             "EXT_sRGB",
+             "EXT_texture_filter_anisotropic",
+             "EXT_texture_storage",
+             "OES_depth24",
+             "OES_element_index_uint",
+             "OES_fbo_render_mipmap",
+             "OES_standard_derivatives",
+             "OES_texture_float",
+             "OES_texture_float_linear",
+             "OES_texture_half_float",
+             "OES_texture_half_float_linear",
+             "OES_vertex_array_object",
+             "WEBGL_color_buffer_float",
+             "WEBGL_compressed_texture_astc",
+             "WEBGL_compressed_texture_atc",
+             "WEBGL_compressed_texture_etc",
+             "WEBGL_compressed_texture_etc1",
+             "WEBGL_compressed_texture_pvrtc",
+             "WEBGL_compressed_texture_s3tc",
+             "WEBGL_compressed_texture_s3tc_srgb",
+             "WEBGL_debug",
+             "WEBGL_debug_renderer_info",
+             "WEBGL_debug_shader_precision",
+             "WEBGL_debug_shaders",
+             "WEBGL_depth_texture",
+             "WEBGL_draw_buffers",
+             "WEBGL_draw_elements_no_range_check",
+             "WEBGL_dynamic_texture",
+             "WEBGL_get_buffer_sub_data_async",
+             "WEBGL_lose_context",
+             "WEBGL_multiview",
+             "WEBGL_security_sensitive_resources",
+             "WEBGL_shared_resources",
+             "WEBGL_subarray_uploads",
+             "WEBGL_subscribe_uniform",
+             "WEBGL_texture_from_depth_video",
+             "WEBGL_texture_multisample",
+             "WEBGL_texture_source_iframe",
+             "WEBGL_video_texture"];
+             
+             log(LOG_DEBUG, "[WebGL] Trying " + glext.length + " extensions");
+             
+             var cnt = 0;
+             var exts = 0;
+             for(j in glext) {
+                 var ext = gl.getExtension(glext[j]);
+                 if(ext != null) {
+                     exts++;
+                     window.wgl[glext[j]] = {}
+                     for(var i in ext) {
+                         try {
+                             window.wgl[glext[j]][i] = gl.getParameter(ext[i]);
+                             cnt++;
+                         } catch(e) {}
+                     }
+                 }
+             }
+             log(LOG_DEBUG, "[WebGL] " + exts + " extensions found");
+             log(LOG_DEBUG, "[WebGL] " + cnt + " properties found");
+             } else {
+                 log(LOG_WARNING, "[WebGL] Could not instantiate WebGL");
+             }
+         }
+         
+         function test(root_name) {
+             log(LOG_INFO, "Waiting for browser identifier\n");
+             
+             var ident = null;
+             if(document.location.hash.indexOf("#") != -1) {
+                 ident = (document.location.hash.substr(1).replace(/-/g, "="));
+                 if(ident == "auto") {
+                     ident = navigator.userAgent;
+                 } else {
+                     ident = atob(ident);
+                 }   
+             }
+             if(ident == null) ident = prompt("Browser Identifier?", navigator.userAgent);
+             if(!(ident == undefined || ident == null || ident.length == 0)) {
+                 log(LOG_INFO, "Adding properties to profile \"" + ident + "\"");
+                 
+                 add_webgl();
+                 
+                 start = window.performance.now();
+                 log(LOG_INFO, "Start collecting properties at root \"" + root_name + "\"");
+                 var root = eval(root_name);
+                 log(LOG_DEBUG, "Root object: " + root);
+         
+                 var fp = {};
+                 scan(root, root_name, fp, 0);
+                 log(LOG_DEBUG, "Scan done");          
+                 var scan1 = JSON.parse(JSON.stringify(fp));
+                 log(LOG_INFO, "First scan saved, waiting 2 seconds for next scan");
+                 
+                 var prop = 0;
+                 for(var i in fp) prop++;
+                 log(LOG_RESULT, "Found " + prop + " properties");
+            log(LOG_RESULT, "Duplicates: " + dups);
+                 
+                 root = eval(root_name);
+                 fp = {};
+                 
+                 window.setTimeout(function() {
+                dups = 0;
+                     log(LOG_DEBUG, "Root object: " + root);
+                     scan(root, root_name, fp, 0);
+                     log(LOG_DEBUG, "Scan done");            
+                     var scan2 = JSON.parse(JSON.stringify(fp));
+                     log(LOG_INFO, "Second scan saved");
+         
+                     var prop2 = 0;
+                     for(var i in fp) prop2++;
+                     log(LOG_RESULT, "Found " + prop2 + " properties");
+                log(LOG_RESULT, "Duplicates: " + dups);
+                     if(prop != prop2) {
+                         var diff = Math.abs(prop - prop2);
+                         log(LOG_WARNING, "Weird, " + diff + (prop2 > prop ? " additional " : " missing ") + "propert" + (diff == 1 ? "y" : "ies"));
+                     }
+                 
+                     // get differences
+                     log(LOG_INFO, "Remove unstable properties");
+                     var l = 0;
+                     var rem = 0, usable = 0;
+                     var ok = {};
+                     for(var k in scan1) {
+                         l++;
+                         if(scan1[k] == scan2[k]) {
+                             ok[k] = scan1[k];
+                             usable++;
+                         } else rem++;
+                     }
+                     log(LOG_RESULT, rem + " propert" + (rem == 1 ? "y" : "ies") + " removed due to difference between scans");
+                     log(LOG_RESULT, usable + " usable propert" + (usable == 1 ? "y" : "ies"));
+                     
+                     console.log(l);
+         
+                     log(LOG_RESULT, "JavaScript Template Attack took " + (window.performance.now() - start) + "ms");
+                     log(LOG_INFO, "Send properties to server");
+                     var oReq = new XMLHttpRequest();
+                     oReq.addEventListener("load", function() {
+                         log(LOG_INFO, "Done!");
+                         log(LOG_RESULT, "<a href='/'>[ Home ]</a> for profile overview");
+                         
+                         document.getElementById("log").innerHTML = logconsole;
+         
+                     });
+                     oReq.open("POST", document.location.protocol + "//" + document.location.host + "/log", true);
+                     oReq.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                     oReq.send("log=" + encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(ok)))).replace(/=/g, "-")) + "&ident=" + ident);
+                     
+                     
+                 }, 2000);
+                 
+             } else {
+                 log(LOG_ERROR, "User aborted!");
+             }
+         }
+         
+         function listAllProperties(o) {
+            var result = [];
+            while(o !== null) {
+                     result = result.concat(Reflect.ownKeys(o));
+                     o = Object.getPrototypeOf(o);
+            }
+            
+            return result; 
+         }
+         
+         function scan(root, root_name, fp, depth) {
+             var rem_roots = [];
+             var scanned_roots = [];
+             var hashes = [];
+         
+             var m_depth = 0;
+             do {
+                 var len = 0;
+                 var keys = listAllProperties(root);
+                 for(var k in keys) {
+                    try {
+                        var p = keys[k];
+                        len++;
+                        var logged = false;
+                        
+                        if(!(p in root)) continue;
+                        try {
+                            var type = typeof(root[p]);
+                        } catch(e) {
+                            continue;
+                        }
+                        
+                        if(type == "function" && root[p] != null && !Array.isArray(root[p])) {
+                            try {
+                                fp[root_name + "." + p] = root[p].toString();
+                                logged = true;
+                            } catch(ex) {
+                            }
+                        }
+            
+                        if(type == "object") {
+                            var dup = scanned_roots.indexOf(root[p]) > -1;
+                            if(!dup && check_hashes) {
+                                h = hash(root[p]);
+                                if(hashes.indexOf(h) > -1) dup = true;
+                            }
+                            if(dup) {
+                    dups++;
+                                continue;
+                            }
+                            if(check_hashes) hashes.push(h);
+                            scanned_roots.push(root[p]);
+                        }
+            
+                        if(type == "number" || type == "string" || type == "boolean") {
+                            logged = true;
+                            try {
+                                fp[root_name + "." + p] = root[p];
+                            } catch(e) {}
+                        }
+                        
+                        
+                        if((type == "object" && root[p] != null && root[p] !== undefined) || Array.isArray(root[p]) ) {
+                            if(depth < max_depth) {
+                                try {
+                                    rem_roots.push({"elem": root[p], "name": root_name + "." + p, "depth": depth + 1});
+                                    logged = true;
+                                } catch(ex) {}
+                            }
+                        }
+                    } catch(ex) {}
+                 }
+                 fp[root_name + "._length"] = len;
+                 var next;
+                 do {
+                     next = rem_roots.pop();
+                 } while(next === undefined && rem_roots.length > 0);
+                 if(next === undefined) break;
+                 root = next.elem;
+                 root_name = next.name;
+                 depth = next.depth;
+                 if(depth > m_depth) m_depth = depth;
+             } while(rem_roots.length > 0);
+             if(m_depth == max_depth) log(LOG_WARNING, "Maximum depth reached, maybe aborted");
+         }
+         
+         window.setTimeout(function() {
+             test(target);
+         }, 1000);
+         
+         })("window");
+      </script>
+   </body>
+</html>
